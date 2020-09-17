@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration name="CommandLineConfig">
+  <Appenders>
+    <Console name="STDOUT">
+      <PatternLayout pattern="%d{HH:mm:ss,SSS} %-5p (%t) [%c{1}] %m%n%throwable{10}"/>
+    </Console>
+    <RollingFile name="File" fileName="query.log" filePattern="./query-perf.log">
+      <PatternLayout>
+        <Pattern>%d{HH:mm:ss,SSS} %-5p (%t:%x) [%c{1}] %m%n</Pattern>
+      </PatternLayout>
+      <Policies>
+        <SizeBasedTriggeringPolicy size="3 GB"/>
+      </Policies>
+      <DefaultRolloverStrategy max="200"/>
+    </RollingFile>
+  </Appenders>
+  <Loggers>
+    <!--Logger name="org.infinispan" level="TRACE"/-->
+    <Root level="INFO">
+      <AppenderRef ref="STDOUT" level="ERROR"/>
+      <AppenderRef ref="File" level="ERROR"/>
+    </Root>
+  </Loggers>
+</Configuration>
