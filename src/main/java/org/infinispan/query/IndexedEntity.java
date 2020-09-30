@@ -15,7 +15,7 @@ public class IndexedEntity {
    String name;
 
    @ProtoField(number = 2)
-   @Field(analyze = Analyze.NO, store = Store.YES)
+   @Field(analyze = Analyze.YES, store = Store.YES)
    String description;
 
    @ProtoFactory

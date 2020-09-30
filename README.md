@@ -11,7 +11,8 @@ The following configuration parameters can be used:
  * ```index_threads_per_node``` The number of threads for each writer node. Default: ```3```
  * ```query_threads_per_node``` The number of threads for each querying node. Default: ```1```
  * ```entries``` The number of entries to insert in the cache. Default: ```100_000```
- * ```query_type``` either ```TERM``` or ```MATCH_ALL```, Default: ```TERM```
+ * ```phrase_size``` The number of words to add to the sample IndexedEntity description field. Default: ```10```
+ * ```query_type``` The type of query to execute: ```TERM```, ```MATCH_ALL_PROJECTIONS```, ```MATCH_ALL```, ```SORT```. Default: ```TERM```
  * ```segments``` the number of Infinispan segments, defaults to ```256```
  * ```worker``` indexing backend worker, ```sync``` or ```async```, default: ```sync```
  * ```reader_strategy``` ```shared```, ```not-shared``` or ```async```. Default: ```shared```
@@ -40,11 +41,19 @@ Each execution will print a summary such as:
 That includes the total duration of the test, the parameter(s) chosen, the 90th percentile of either query or index operations.
 and a throughput measure.
 
-### Flight recorder
+### Profiling
+
+#### Flight recorder
 
 To enable flight recordings, export the MAVEN_OPTS variable:
 
 ```
 export MAVEN_OPTS="-XX:StartFlightRecording=disk=true,dumponexit=true,filename=recording.jfr,maxsize=1024m,maxage=1d,settings=profile,path-to-gc-roots=true
+```
+
+#### YourKit
+
+```
+export MAVEN_OPTS="-agentpath:<YOURKIT_INSTALLATION>/bin/linux-x86-64/libyjpagent.so=tracing,onexit=snapshot,sessionname=<NAME>,dir=.,tracing"
 ```
 

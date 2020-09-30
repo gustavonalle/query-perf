@@ -2,7 +2,6 @@ package org.infinispan.query;
 
 import static java.util.concurrent.CompletableFuture.supplyAsync;
 import static java.util.stream.IntStream.range;
-import static java.util.stream.IntStream.rangeClosed;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -43,6 +42,7 @@ public class QueryPerf {
    private static final int DEFAULT_QUERYING_THREADS_PER_NODE = 1;
    private static final int DEFAULT_INDEXING_NODES = 3;
    private static final int DEFAULT_QUERYING_NODES = 1;
+   private static final int DEFAULT_PHRASE_SIZE = 10;
    private static final String DEFAULT_READER_REFRESH_MS = "100";
    private static final String DEFAULT_WORKER = "sync";
    private static final String DEFAULT_READER = "shared";
@@ -57,6 +57,7 @@ public class QueryPerf {
    private static final String QUERY_TYPE_SYS_PROP = "query_type";
    private static final String INDEXING_NODES_SYS_PROP = "index_nodes";
    private static final String QUERYING_NODES_SYS_PROP = "query_nodes";
+   private static final String PHRASE_SIZE_SYS_PROP = "phrase_size";
    private static final String READER_SYS_PROP = "reader_strategy";
    private static final String READER_REFRESH = "reader_refresh";
 
@@ -72,8 +73,9 @@ public class QueryPerf {
    public static final String INDEX_DIR = "target/";
 
    protected Random random = new Random();
+   private final DataGenerator dataGenerator = new DataGenerator();
 
-   List<Cache<String, IndexedEntity>> caches = new ArrayList<>();
+   List<Cache<Integer, IndexedEntity>> caches = new ArrayList<>();
    List<EmbeddedCacheManager> cacheManagers = new ArrayList<>();
 
    protected String getIndexManager() {
@@ -102,6 +104,10 @@ public class QueryPerf {
 
    protected int getQueryingNodes() {
       return Integer.getInteger(QUERYING_NODES_SYS_PROP, DEFAULT_QUERYING_NODES);
+   }
+
+   protected int getPhraseSize() {
+      return Integer.getInteger(PHRASE_SIZE_SYS_PROP, DEFAULT_PHRASE_SIZE);
    }
 
    protected int getIndexingNodes() {
@@ -155,21 +161,32 @@ public class QueryPerf {
       return DEFAULT_NUM_OWNERS;
    }
 
-   synchronized Cache<String, IndexedEntity> pickCache() {
+   synchronized Cache<Integer, IndexedEntity> pickCache() {
       return caches.get(random.nextInt(caches.size()));
+   }
+
+   protected String createQuery(QueryType queryType) {
+      String className = IndexedEntity.class.getName();
+      switch (queryType) {
+         case MATCH_ALL:
+            return String.format("FROM %s", className);
+         case MATCH_ALL_PROJECTIONS:
+            return String.format("SELECT name FROM %s WHERE description :\"%s\"", className, dataGenerator.getUsedWord());
+         case TERM:
+            return String.format("FROM %s WHERE description : \"%s\"", className, dataGenerator.getUsedWord());
+         case SORT:
+            return String.format("FROM %s WHERE description : \"%s\" ORDER BY name", className, dataGenerator.getUsedWord());
+      }
+      return null;
    }
 
    protected void assertDocsIndexed() {
       int numEntries = getNumEntries();
       this.eventually(() -> {
-         Query<Object[]> query = Search.getQueryFactory(pickCache()).create("FROM org.infinispan.query.IndexedEntity");
+         Query<Object[]> query = Search.getQueryFactory(pickCache()).create(createQuery(QueryType.MATCH_ALL));
          QueryResult<Object[]> execute = query.maxResults(10).execute();
          return execute.hitCount().orElse(-1) == numEntries;
       });
-   }
-
-   void populate(int initialId, int finalId) {
-      rangeClosed(initialId, finalId).forEach(i -> pickCache().put(String.valueOf(i), new IndexedEntity("name" + i, "desc " + i)));
    }
 
    synchronized void addNode() {
@@ -178,7 +195,7 @@ public class QueryPerf {
    }
 
    protected void waitForClusterToForm() {
-      Cache<String, IndexedEntity> cache = caches.get(0);
+      Cache<Integer, IndexedEntity> cache = caches.get(0);
       TestingUtil.blockUntilViewsReceived(30000, caches);
       if (cache.getCacheConfiguration().clustering().cacheMode().isClustered()) {
          TestingUtil.waitForNoRebalance(caches);
@@ -214,7 +231,7 @@ public class QueryPerf {
     */
    abstract class Node {
       protected EmbeddedCacheManager cacheManager;
-      protected Cache<String, IndexedEntity> cache;
+      protected Cache<Integer, IndexedEntity> cache;
       final int WARMUP_ITERATIONS = 1000;
       final LatencyStats latencyStats = new LatencyStats();
 
@@ -296,7 +313,7 @@ public class QueryPerf {
             id = globalCounter.incrementAndGet();
             if (id <= numEntries) {
                long start = System.nanoTime();
-               cache.put(String.valueOf(id), new IndexedEntity("name" + id, "desc " + id));
+               cache.put(id, new IndexedEntity("name" + id, dataGenerator.randomPhrase(getPhraseSize())));
                if (id % 1000 == 0)
                   System.out.println("Put " + id);
                latencyStats.recordLatency(System.nanoTime() - start);
@@ -307,7 +324,7 @@ public class QueryPerf {
       @Override
       void warmup() {
          for (int i = 0; i < WARMUP_ITERATIONS; i++) {
-            cache.put(String.valueOf(random.nextInt(WARMUP_ITERATIONS)), new IndexedEntity("name" + i, "desc " + i));
+            cache.put(random.nextInt(WARMUP_ITERATIONS), new IndexedEntity("name" + i, dataGenerator.randomPhraseWithoutTracking()));
             if (i % 100 == 0) {
                System.out.printf("[Warmup] Added %d entries\n", i);
             }
@@ -315,7 +332,7 @@ public class QueryPerf {
       }
    }
 
-   enum QueryType {MATCH_ALL, TERM}
+   enum QueryType {TERM, MATCH_ALL_PROJECTIONS, MATCH_ALL, SORT}
 
    /**
     * A {@link Node} that executes a fixed amount of queries against the cache.
@@ -324,39 +341,10 @@ public class QueryPerf {
 
       static final int QUERY_INTERVAL_MS = 10;
       final QueryType queryType;
-      volatile Query<IndexedEntity> query;
 
       QueryingNode(int nThreads, AtomicInteger globalCounter, QueryType queryType) {
          super(nThreads, globalCounter);
          this.queryType = queryType;
-      }
-
-      Query<IndexedEntity> getQuery() {
-         return Search.getQueryFactory(cache).create(createLuceneQuery());
-//         if (query == null) {
-//            synchronized (this) {
-//               if (query == null) {
-//                  query = Search.getQueryFactory(cache).create(createLuceneQuery());
-//                  query.maxResults(10);
-//               }
-//            }
-//         }
-//         return query;
-      }
-
-
-      protected String createLuceneQuery() {
-         if (queryType == QueryType.MATCH_ALL) {
-            return "FROM org.infinispan.query.IndexedEntity";
-         }
-         if (queryType == QueryType.TERM) {
-            return "SELECT name FROM org.infinispan.query.IndexedEntity";
-         }
-         return null;
-      }
-
-      protected int getRandomTerm() {
-         return Math.round((float) (globalCounter.get() * 0.75));
       }
 
       @Override
@@ -364,7 +352,7 @@ public class QueryPerf {
          int id = globalCounter.get();
          int numEntries = getNumEntries();
          while (id <= numEntries) {
-            Query<IndexedEntity> query = getQuery();
+            Query<IndexedEntity> query = Search.getQueryFactory(cache).create(createQuery(getQueryType()));
             long start = System.nanoTime();
             List<IndexedEntity> list = query.execute().list();
             latencyStats.recordLatency(System.nanoTime() - start);
@@ -401,17 +389,13 @@ public class QueryPerf {
       }
 
       @Override
-      protected int getRandomTerm() {
-         return random.nextInt(getNumEntries());
-      }
-
-      @Override
       void executeTask() {
          long now = System.nanoTime();
          long timeLimit = now + durationNanos;
          while (timeLimit - System.nanoTime() > 0L) {
+            String q = createQuery(getQueryType());
             long start = System.nanoTime();
-            QueryResult<IndexedEntity> queryResult = getQuery().execute();
+            QueryResult<IndexedEntity> queryResult = Search.getQueryFactory(cache).<IndexedEntity>create(q).execute();
             int size = queryResult.list().size();
             latencyStats.recordLatency(System.nanoTime() - start);
             LockSupport.parkNanos(waitIntervalNanos);
@@ -432,18 +416,11 @@ public class QueryPerf {
       }
 
       @Override
-      protected int getRandomTerm() {
-         return random.nextInt(getNumEntries());
-      }
-
-      @Override
       void executeTask() {
          for (int i = 0; i < totalQueries; i++) {
             long start = System.nanoTime();
-            QueryResult<IndexedEntity> queryResult = getQuery().execute();
-            System.out.println("List size " + queryResult.list().size());
-            System.out.println("Hit count " + queryResult.hitCount());
-
+            String q = createQuery(getQueryType());
+            QueryResult<IndexedEntity> queryResult = Search.getQueryFactory(cache).<IndexedEntity>create(q).execute();
             latencyStats.recordLatency(System.nanoTime() - start);
          }
       }
@@ -456,7 +433,7 @@ public class QueryPerf {
    /**
     * Summarizes performance data from a {@link Histogram} for displaying.
     */
-   class NodeSummary {
+   static class NodeSummary {
       private final Histogram histogram;
       private final long totalTimeMs;
 
@@ -583,7 +560,7 @@ public class QueryPerf {
       System.out.println("Adding data to the cluster");
       ExecutorService executorService = Executors.newFixedThreadPool(threads);
       for (Node node : nodes) {
-         Cache<String, IndexedEntity> cache = node.cache;
+         Cache<Integer, IndexedEntity> cache = node.cache;
          CompletableFuture<?>[] futures = new CompletableFuture[threads];
          for (int i = 0; i < threads; i++) {
             futures[i] = CompletableFuture.supplyAsync(() -> {
@@ -591,7 +568,7 @@ public class QueryPerf {
                do {
                   id = globalCounter.incrementAndGet();
                   if (id <= entries) {
-                     cache.put(String.valueOf(id), new IndexedEntity("name" + id, "desc" + id));
+                     cache.put(id, new IndexedEntity("name" + id, dataGenerator.randomPhrase(getPhraseSize())));
                      if (id % 1000 == 0)
                         System.out.print(id + "\r");
                   }
