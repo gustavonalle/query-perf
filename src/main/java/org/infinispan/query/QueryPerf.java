@@ -19,8 +19,8 @@ import java.util.stream.Stream;
 
 import org.HdrHistogram.Histogram;
 import org.LatencyUtils.LatencyStats;
-import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.infinispan.Cache;
 import org.infinispan.commons.util.ProcessorInfo;
 import org.infinispan.configuration.cache.CacheMode;
@@ -58,6 +58,8 @@ public class QueryPerf {
    private static final String QUERY_THREADS_SYS_PROP = "query_threads_per_node";
    private static final String WORKER_SYS_PROP = "worker";
    private static final String QUERY_TYPE_SYS_PROP = "query_type";
+   private static final String QUERY_SORT_PROP = "query_sort";
+   private static final String QUERY_PROJECTION_SYS_PROP = "query_projection";
    private static final String INDEXING_NODES_SYS_PROP = "index_nodes";
    private static final String QUERYING_NODES_SYS_PROP = "query_nodes";
    private static final String PHRASE_SIZE_SYS_PROP = "phrase_size";
@@ -134,6 +136,14 @@ public class QueryPerf {
       return sysProp == null ? DEFAULT_QUERY_TYPE : QueryType.valueOf(sysProp.toUpperCase());
    }
 
+   protected boolean getQuerySort() {
+      return Boolean.getBoolean(QUERY_SORT_PROP);
+   }
+
+   protected boolean getQueryProjection() {
+      return Boolean.getBoolean(QUERY_PROJECTION_SYS_PROP);
+   }
+
    protected ConfigurationBuilder getDefaultCacheConfigBuilder() {
       ConfigurationBuilder builder = new ConfigurationBuilder();
       builder.clustering().cacheMode(CacheMode.DIST_SYNC).transaction().cacheStopTimeout(0L);
@@ -171,16 +181,22 @@ public class QueryPerf {
    protected String createQuery(QueryType queryType) {
       String className = IndexedEntity.class.getName();
       switch (queryType) {
-         case MATCH_ALL:
-            return String.format("FROM %s", className);
-         case MATCH_ALL_PROJECTIONS:
-            return String.format("SELECT name FROM %s WHERE description :\"%s\"", className, dataGenerator.getUsedWord());
          case TERM:
-            return String.format("FROM %s WHERE description : \"%s\"", className, dataGenerator.getUsedWord());
-         case SORT:
-            return String.format("FROM %s WHERE description : \"%s\" ORDER BY name", className, dataGenerator.getUsedWord());
+            return addSortAndProjection(String.format("FROM %s WHERE description : \"%s\"", className, dataGenerator.getUsedWord()));
+         case MATCH_ALL:
+            return addSortAndProjection(String.format("FROM %s", className));
       }
       return null;
+   }
+
+   private String addSortAndProjection(String q) {
+      if (getQuerySort()) {
+         q = q + " ORDER BY name ";
+      }
+      if (getQueryProjection()) {
+         q = "SELECT name " + q;
+      }
+      return q;
    }
 
    protected void assertDocsIndexed() {
@@ -335,7 +351,7 @@ public class QueryPerf {
       }
    }
 
-   enum QueryType {TERM, MATCH_ALL_PROJECTIONS, MATCH_ALL, SORT}
+   enum QueryType {TERM, MATCH_ALL}
 
    /**
     * A {@link Node} that executes a fixed amount of queries against the cache.

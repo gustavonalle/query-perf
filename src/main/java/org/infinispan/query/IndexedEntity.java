@@ -3,6 +3,7 @@ package org.infinispan.query;
 import org.hibernate.search.annotations.Analyze;
 import org.hibernate.search.annotations.Field;
 import org.hibernate.search.annotations.Indexed;
+import org.hibernate.search.annotations.SortableField;
 import org.hibernate.search.annotations.Store;
 import org.infinispan.protostream.annotations.ProtoFactory;
 import org.infinispan.protostream.annotations.ProtoField;
@@ -11,7 +12,8 @@ import org.infinispan.protostream.annotations.ProtoField;
 public class IndexedEntity {
 
    @ProtoField(number = 1)
-   @Field(analyze = Analyze.YES, store = Store.YES)
+   @Field(analyze = Analyze.NO, store = Store.YES)
+   @SortableField
    String name;
 
    @ProtoField(number = 2)

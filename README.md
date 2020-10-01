@@ -12,7 +12,9 @@ The following configuration parameters can be used:
  * ```query_threads_per_node``` The number of threads for each querying node. Default: ```1```
  * ```entries``` The number of entries to insert in the cache. Default: ```100_000```
  * ```phrase_size``` The number of words to add to the sample IndexedEntity description field. Default: ```10```
- * ```query_type``` The type of query to execute: ```TERM```, ```MATCH_ALL_PROJECTIONS```, ```MATCH_ALL```, ```SORT```. Default: ```TERM```
+ * ```query_type``` The type of query to execute: ```TERM```, ```MATCH_ALL```. Default: ```TERM```
+ * ```query_projection``` If ```true```, adds a projection to the query. Default: ```false```
+ * ```query_sort``` If ```true```, adds sorting to the query. Default: ```false```
  * ```segments``` the number of Infinispan segments, defaults to ```256```
  * ```worker``` indexing backend worker, ```sync``` or ```async```, default: ```sync```
  * ```reader_strategy``` ```shared```, ```not-shared``` or ```async```. Default: ```shared```
