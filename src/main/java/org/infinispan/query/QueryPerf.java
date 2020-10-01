@@ -19,6 +19,8 @@ import java.util.stream.Stream;
 
 import org.HdrHistogram.Histogram;
 import org.LatencyUtils.LatencyStats;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
 import org.infinispan.Cache;
 import org.infinispan.commons.util.ProcessorInfo;
 import org.infinispan.configuration.cache.CacheMode;
@@ -32,6 +34,7 @@ import org.infinispan.query.dsl.QueryResult;
 import org.infinispan.test.TestingUtil;
 
 public class QueryPerf {
+   private static final Logger logger = LogManager.getLogger(QueryPerf.class);
 
    private static final String DEFAULT_INDEX_MANAGER = "near-real-time";
    private static final int DEFAULT_NUM_ENTRIES = 100_000;
@@ -398,6 +401,7 @@ public class QueryPerf {
             QueryResult<IndexedEntity> queryResult = Search.getQueryFactory(cache).<IndexedEntity>create(q).execute();
             int size = queryResult.list().size();
             latencyStats.recordLatency(System.nanoTime() - start);
+            logger.debug("{} results from {}", size, q);
             LockSupport.parkNanos(waitIntervalNanos);
          }
       }
@@ -490,6 +494,8 @@ public class QueryPerf {
    }
 
    public void testQueryOnly() throws Exception {
+      logger.info("Starting Query Only Test");
+      logger.info("{} nodes querying with {} threads each, doing {} queries", getQueryingNodes(), getQueryThreadsPerNode(), getQueryType());
       nodes.addAll(range(0, getQueryingNodes()).boxed()
             .map(i -> new TimeBoundQueryNode(60L, TimeUnit.SECONDS, 10L, TimeUnit.MILLISECONDS,
                   getQueryThreadsPerNode(), getQueryType()))
