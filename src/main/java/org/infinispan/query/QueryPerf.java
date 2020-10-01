@@ -144,20 +144,21 @@ public class QueryPerf {
       return Boolean.getBoolean(QUERY_PROJECTION_SYS_PROP);
    }
 
-   protected ConfigurationBuilder getDefaultCacheConfigBuilder() {
+   protected ConfigurationBuilder getDefaultCacheConfigBuilder(String name) {
       ConfigurationBuilder builder = new ConfigurationBuilder();
       builder.clustering().cacheMode(CacheMode.DIST_SYNC).transaction().cacheStopTimeout(0L);
       builder.statistics().enable();
+      String indexBase = INDEX_DIR + name;
       builder.indexing().enabled(true)
             .addIndexedEntities(IndexedEntity.class)
             // ISPN 11 properties
             .addProperty("default.indexmanager", "near-real-time")
-            .addProperty("default.indexBase", INDEX_DIR)
+            .addProperty("default.indexBase", indexBase)
             .addProperty("default.indexwriter.merge_factor", "30")
             .addProperty("default.indexwriter.merge_max_size", "1024")
             .addProperty("default.indexwriter.ram_buffer_size", "256")
             // ISPN 12 properties
-            .addProperty("directory.root", INDEX_DIR)
+            .addProperty("directory.root", indexBase)
             .addProperty(IO_MERGE_FACTOR, "30")
             .addProperty(IO_MERGE_MAX_SIZE, "1024")
             .addProperty(IO_WRITER_RAM_BUFFER_SIZE, "256")
@@ -208,11 +209,6 @@ public class QueryPerf {
       });
    }
 
-   synchronized void addNode() {
-      addClusterEnabledCacheManager(getDefaultCacheConfigBuilder());
-      waitForClusterToForm();
-   }
-
    protected void waitForClusterToForm() {
       Cache<Integer, IndexedEntity> cache = caches.get(0);
       TestingUtil.blockUntilViewsReceived(30000, caches);
@@ -251,11 +247,16 @@ public class QueryPerf {
    abstract class Node {
       protected EmbeddedCacheManager cacheManager;
       protected Cache<Integer, IndexedEntity> cache;
+      protected final String name;
       final int WARMUP_ITERATIONS = 1000;
       final LatencyStats latencyStats = new LatencyStats();
 
+      public Node(String name) {
+         this.name = name;
+      }
+
       Node addToCluster() {
-         cacheManager = addClusterEnabledCacheManager(getDefaultCacheConfigBuilder());
+         cacheManager = addClusterEnabledCacheManager(getDefaultCacheConfigBuilder(name));
          cache = cacheManager.getCache();
          caches.add(cache);
          return this;
@@ -288,7 +289,8 @@ public class QueryPerf {
       private final int nThreads;
       protected AtomicInteger globalCounter;
 
-      TaskNode(int nThreads, AtomicInteger globalCounter) {
+      TaskNode(int nThreads, AtomicInteger globalCounter, String name) {
+         super(name);
          executorService = Executors.newFixedThreadPool(nThreads, r -> {
             Thread thread = new Thread(r);
             thread.setName("TaskNode");
@@ -320,8 +322,8 @@ public class QueryPerf {
     * A {@link Node} that simply generated data and indexes data.
     */
    class IndexingNode extends TaskNode {
-      IndexingNode(int nThreads, AtomicInteger globalCounter) {
-         super(nThreads, globalCounter);
+      IndexingNode(int nThreads, AtomicInteger globalCounter, String name) {
+         super(nThreads, globalCounter, name);
       }
 
       @Override
@@ -361,8 +363,8 @@ public class QueryPerf {
       static final int QUERY_INTERVAL_MS = 10;
       final QueryType queryType;
 
-      QueryingNode(int nThreads, AtomicInteger globalCounter, QueryType queryType) {
-         super(nThreads, globalCounter);
+      QueryingNode(int nThreads, AtomicInteger globalCounter, QueryType queryType, String name) {
+         super(nThreads, globalCounter, name);
          this.queryType = queryType;
       }
 
@@ -401,8 +403,8 @@ public class QueryPerf {
       private final long waitIntervalNanos;
 
       TimeBoundQueryNode(long totalTime, TimeUnit totalTimeUnit, long waitBetweenQueries, TimeUnit waiTimeUnit,
-                         int nThreads, QueryType queryType) {
-         super(nThreads, null, queryType);
+                         int nThreads, QueryType queryType, String name) {
+         super(nThreads, null, queryType, name);
          this.waitIntervalNanos = TimeUnit.NANOSECONDS.convert(waitBetweenQueries, waiTimeUnit);
          this.durationNanos = TimeUnit.NANOSECONDS.convert(totalTime, totalTimeUnit);
       }
@@ -430,8 +432,8 @@ public class QueryPerf {
 
       private final long totalQueries;
 
-      FixedNumberQueryNode(long totalQueries, int nThreads, QueryType queryType) {
-         super(nThreads, null, queryType);
+      FixedNumberQueryNode(long totalQueries, int nThreads, QueryType queryType, String name) {
+         super(nThreads, null, queryType, name);
          this.totalQueries = totalQueries;
       }
 
@@ -498,9 +500,9 @@ public class QueryPerf {
 
    public void testQueryWithWrites() {
       nodes.addAll(range(0, getIndexingNodes()).boxed()
-            .map(i -> new IndexingNode(getIndexThreadsPerNode(), globalCounter)).collect(Collectors.toList()));
+            .map(i -> new IndexingNode(getIndexThreadsPerNode(), globalCounter, "indexing-" + i)).collect(Collectors.toList()));
       nodes.addAll(range(0, getQueryingNodes()).boxed()
-            .map(i -> new QueryingNode(getQueryThreadsPerNode(), globalCounter, getQueryType())).collect(Collectors.toList()));
+            .map(i -> new QueryingNode(getQueryThreadsPerNode(), globalCounter, getQueryType(), "querying-" + i)).collect(Collectors.toList()));
       nodes.forEach(Node::addToCluster);
       waitForClusterToForm();
       warmup();
@@ -514,7 +516,7 @@ public class QueryPerf {
       logger.info("{} nodes querying with {} threads each, doing {} queries", getQueryingNodes(), getQueryThreadsPerNode(), getQueryType());
       nodes.addAll(range(0, getQueryingNodes()).boxed()
             .map(i -> new TimeBoundQueryNode(60L, TimeUnit.SECONDS, 10L, TimeUnit.MILLISECONDS,
-                  getQueryThreadsPerNode(), getQueryType()))
+                  getQueryThreadsPerNode(), getQueryType(), "querying-" + i))
             .collect(Collectors.toList()));
       nodes.forEach(Node::addToCluster);
 
